@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="hi">
+<head>
+<meta charset="utf-8">
+<title>नींद क्यों ज़रूरी है</title>
+<style>
+  @font-face { font-family: "Baloo 2"; font-weight: 600; src: url(assets/baloo-2-devanagari-600-normal.woff2) format("woff2"); unicode-range: U+0900-097F, U+1CD0-1CF9, U+200C-200D, U+20A8, U+20B9, U+25CC, U+A830-A839, U+A8E0-A8FF; }
+  @font-face { font-family: "Baloo 2"; font-weight: 600; src: url(assets/baloo-2-latin-600-normal.woff2) format("woff2"); unicode-range: U+0000-00FF, U+2000-206F, U+2190-22FF; }
+  @font-face { font-family: "Baloo 2"; font-weight: 800; src: url(assets/baloo-2-devanagari-800-normal.woff2) format("woff2"); unicode-range: U+0900-097F, U+1CD0-1CF9, U+200C-200D, U+20A8, U+20B9, U+25CC, U+A830-A839, U+A8E0-A8FF; }
+  @font-face { font-family: "Baloo 2"; font-weight: 800; src: url(assets/baloo-2-latin-800-normal.woff2) format("woff2"); unicode-range: U+0000-00FF, U+2000-206F, U+2190-22FF; }
+  @font-face { font-family: "Mukta"; font-weight: 500; src: url(assets/mukta-devanagari-500-normal.woff2) format("woff2"); unicode-range: U+0900-097F, U+1CD0-1CF9, U+200C-200D, U+20A8, U+20B9, U+25CC, U+A830-A839, U+A8E0-A8FF; }
+  @font-face { font-family: "Mukta"; font-weight: 500; src: url(assets/mukta-latin-500-normal.woff2) format("woff2"); unicode-range: U+0000-00FF, U+2000-206F, U+2190-22FF; }
+  @font-face { font-family: "Mukta"; font-weight: 700; src: url(assets/mukta-devanagari-700-normal.woff2) format("woff2"); unicode-range: U+0900-097F, U+1CD0-1CF9, U+200C-200D, U+20A8, U+20B9, U+25CC, U+A830-A839, U+A8E0-A8FF; }
+  @font-face { font-family: "Mukta"; font-weight: 700; src: url(assets/mukta-latin-700-normal.woff2) format("woff2"); unicode-range: U+0000-00FF, U+2000-206F, U+2190-22FF; }
+  html, body { margin: 0; background: #070b1f; }
+  canvas { display: block; width: 100vw; max-width: 540px; margin: 0 auto; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1080" height="1920"></canvas>
+<script>
+// "Why we sleep" — Hindi 9:16 explainer. render(t) is pure: same t, same frame.
+const W = 1080, H = 1920, DURATION = 31, FPS = 30;
+const cv = document.getElementById("c");
+const ctx = cv.getContext("2d");
+
+const C = {
+  bg0: "#070b1f", bg1: "#141a46", bg2: "#2a1f5c",
+  ink: "#f4f1ff", dim: "#a9a6d6", moon: "#ffd66b",
+  teal: "#5ce1d0", pink: "#ff8fab", lilac: "#c9a7ff", lilacDk: "#8a6ad6",
+};
+
+// ---------- helpers ----------
+const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+const lerp = (a, b, k) => a + (b - a) * k;
+const prog = (t, a, b) => clamp((t - a) / (b - a));
+const easeOut = k => 1 - Math.pow(1 - k, 3);
+const easeInOut = k => k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
+const backOut = k => { const s = 1.6; k -= 1; return k * k * ((s + 1) * k + s) + 1; };
+function rng(seed) { return () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; }; }
+
+// visibility of a scene window with soft in/out
+function win(t, a, b, fi = 0.45, fo = 0.4) {
+  return Math.min(easeOut(prog(t, a, a + fi)), 1 - easeInOut(prog(t, b - fo, b)));
+}
+
+function text(str, x, y, o = {}) {
+  const { size = 72, weight = 800, family = "Baloo 2", color = C.ink, alpha = 1, align = "center", glow = 0, maxW } = o;
+  if (alpha <= 0.001) return;
+  ctx.save();
+  ctx.globalAlpha *= alpha;
+  ctx.font = `${weight} ${size}px "${family}"`;
+  ctx.textAlign = align;
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = color;
+  if (glow) { ctx.shadowColor = color; ctx.shadowBlur = glow; }
+  ctx.fillText(str, x, y, maxW);
+  ctx.restore();
+}
+
+// line that rises + fades in at time `at`
+function riseText(t, at, str, x, y, o = {}) {
+  const k = easeOut(prog(t, at, at + 0.55));
+  text(str, x, y + (1 - k) * 46, { ...o, alpha: (o.alpha ?? 1) * k });
+}
+
+// ---------- persistent background ----------
+const stars = (() => { const r = rng(7); return Array.from({ length: 140 }, () => ({ x: r() * W, y: r() * H, s: 0.6 + r() * 2.2, ph: r() * 6.28, sp: 0.6 + r() * 1.6 })); })();
+
+function background(t) {
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  // the sky slowly warms toward the end, like dawn after a full night
+  const dawn = easeInOut(prog(t, 27, 31));
+  g.addColorStop(0, C.bg0);
+  g.addColorStop(0.55, C.bg1);
+  g.addColorStop(1, mix(C.bg2, "#5a2f6e", dawn));
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  for (const s of stars) {
+    const tw = 0.45 + 0.55 * Math.sin(t * s.sp + s.ph) ** 2;
+    const y = (s.y - t * 6 * s.s + H) % H;
+    ctx.globalAlpha = tw * 0.85;
+    ctx.fillStyle = "#fff";
+    ctx.beginPath(); ctx.arc(s.x, y, s.s, 0, 6.283); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function mix(a, b, k) {
+  const pa = [1, 3, 5].map(i => parseInt(a.slice(i, i + 2), 16));
+  const pb = [1, 3, 5].map(i => parseInt(b.slice(i, i + 2), 16));
+  return `rgb(${pa.map((v, i) => Math.round(lerp(v, pb[i], k))).join(",")})`;
+}
+
+const moonCanvas = document.createElement("canvas");
+function moon(x, y, r, alpha = 1) {
+  if (alpha <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  const halo = ctx.createRadialGradient(x, y, r * 0.6, x, y, r * 3);
+  halo.addColorStop(0, "rgba(255,214,107,0.35)");
+  halo.addColorStop(1, "rgba(255,214,107,0)");
+  ctx.fillStyle = halo;
+  ctx.beginPath(); ctx.arc(x, y, r * 3, 0, 6.283); ctx.fill();
+  // crescent: full disc minus offset disc
+  // crescent: disc with an offset disc cut out, drawn on a scratch canvas
+  const m = moonCanvas, d = Math.ceil(r * 2 + 4);
+  m.width = m.height = d;
+  const mc = m.getContext("2d");
+  mc.fillStyle = C.moon;
+  mc.beginPath(); mc.arc(d / 2, d / 2, r, 0, 6.283); mc.fill();
+  mc.globalCompositeOperation = "destination-out";
+  mc.beginPath(); mc.arc(d / 2 + r * 0.42, d / 2 - r * 0.22, r * 0.86, 0, 6.283); mc.fill();
+  ctx.drawImage(m, x - d / 2, y - d / 2);
+  ctx.restore();
+}
+
+// header chip + progress, present for the whole video
+function chrome(t) {
+  const a = easeOut(prog(t, 0.2, 0.8)) * (1 - easeInOut(prog(t, 29.6, 30.4)));
+  if (a <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = a;
+  const w = 560, h = 84, x = (W - w) / 2, y = 150;
+  ctx.fillStyle = "rgba(255,255,255,0.08)";
+  ctx.strokeStyle = "rgba(255,255,255,0.18)";
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.roundRect(x, y, w, h, 42); ctx.fill(); ctx.stroke();
+  text("नींद क्यों ज़रूरी है?", W / 2, y + h / 2 + 3, { size: 44, weight: 600, family: "Mukta", color: C.ink });
+  ctx.fillStyle = "rgba(255,255,255,0.12)";
+  ctx.fillRect(x + 40, y + h + 18, w - 80, 6);
+  ctx.fillStyle = C.moon;
+  ctx.fillRect(x + 40, y + h + 18, (w - 80) * clamp(t / 30), 6);
+  ctx.restore();
+}
+
+// ---------- brain ----------
+const LOBES = [
+  [-150, -40, 120], [-60, -110, 125], [60, -110, 125], [150, -40, 120],
+  [-180, 60, 100], [-80, 40, 120], [40, 40, 125], [160, 60, 105],
+  [-110, 120, 90], [20, 125, 95], [120, 120, 80],
+];
+function brain(cx, cy, s, alpha = 1, glow = 0) {
+  if (alpha <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(cx, cy);
+  ctx.scale(s, s);
+  if (glow) { ctx.shadowColor = C.lilac; ctx.shadowBlur = glow; }
+  ctx.fillStyle = C.lilacDk;
+  for (const [x, y, r] of LOBES) { ctx.beginPath(); ctx.arc(x, y, r + 10, 0, 6.283); ctx.fill(); }
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = C.lilac;
+  for (const [x, y, r] of LOBES) { ctx.beginPath(); ctx.arc(x, y, r, 0, 6.283); ctx.fill(); }
+  // stem
+  ctx.fillStyle = C.lilacDk;
+  ctx.beginPath(); ctx.roundRect(30, 170, 70, 110, 30); ctx.fill();
+  // gyri
+  ctx.strokeStyle = C.lilacDk;
+  ctx.lineWidth = 11;
+  ctx.lineCap = "round";
+  const sq = [
+    [[-10, -200], [-30, -110], [10, -40], [-10, 60], [5, 180]],
+    [[-210, -40], [-150, -70], [-110, -20], [-160, 30]],
+    [[200, -30], [140, -60], [100, -10], [150, 40]],
+    [[-120, -140], [-80, -90], [-120, -60]],
+    [[110, -150], [70, -100], [110, -60]],
+    [[-150, 120], [-90, 90], [-40, 130]],
+    [[60, 110], [120, 80], [170, 110]],
+  ];
+  for (const p of sq) {
+    ctx.beginPath(); ctx.moveTo(...p[0]);
+    for (let i = 1; i < p.length - 1; i++) {
+      const mx = (p[i][0] + p[i + 1][0]) / 2, my = (p[i][1] + p[i + 1][1]) / 2;
+      ctx.quadraticCurveTo(p[i][0], p[i][1], mx, my);
+    }
+    ctx.lineTo(...p[p.length - 1]);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// ---------- scenes ----------
+// S1 0–4.6: hook — a third of life asleep
+function s1(t) {
+  const a = win(t, 0, 4.6, 0.01);
+  if (a <= 0) return;
+  ctx.save(); ctx.globalAlpha = a;
+  const mk = easeOut(prog(t, 0, 1.6));
+  moon(W / 2 - 20, lerp(1250, 905, mk), 105, mk);
+  riseText(t, 0.3, "हम अपनी ज़िंदगी का", W / 2, 380, { size: 70, weight: 600 });
+  const pop = backOut(prog(t, 0.8, 1.4));
+  ctx.save();
+  ctx.translate(W / 2, 540); ctx.scale(pop, pop);
+  text("1/3 हिस्सा", 0, 0, { size: 170, color: C.moon, glow: 30, alpha: clamp(pop) });
+  ctx.restore();
+  riseText(t, 1.3, "सोकर बिताते हैं", W / 2, 690, { size: 70, weight: 600 });
+  // counter
+  const ck = easeInOut(prog(t, 2.2, 3.6));
+  const shown = t > 2.1;
+  if (shown) {
+    const ca = easeOut(prog(t, 2.1, 2.5));
+    ctx.save(); ctx.globalAlpha *= ca;
+    ctx.fillStyle = "rgba(255,255,255,0.07)";
+    ctx.beginPath(); ctx.roundRect(W / 2 - 300, 1080, 600, 250, 40); ctx.fill();
+    text(`लगभग ${Math.round(26 * ck)} साल!`, W / 2, 1170, { size: 96, color: C.ink });
+    text("(79 साल की उम्र में)", W / 2, 1265, { size: 40, weight: 500, family: "Mukta", color: C.dim });
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+// S2 4.6–9.8: brain keeps working; EEG waves slow into deep sleep
+function s2(t) {
+  const a = win(t, 4.4, 9.8);
+  if (a <= 0) return;
+  ctx.save(); ctx.globalAlpha = a;
+  riseText(t, 4.7, "पर सोते वक़्त", W / 2, 380, { size: 70, weight: 600 });
+  riseText(t, 5.0, "दिमाग़ बंद नहीं होता", W / 2, 490, { size: 92, color: C.lilac });
+  const bk = backOut(prog(t, 5.2, 6.0));
+  const breathe = 1 + 0.025 * Math.sin(t * 2.2);
+  brain(W / 2, 880, 0.95 * bk * breathe, clamp(bk), 40);
+  // EEG strip: fast awake waves → slow deep-sleep waves
+  const ek = prog(t, 6.2, 6.8);
+  if (ek > 0) {
+    const slow = easeInOut(prog(t, 7.0, 8.6));
+    const freq = lerp(0.075, 0.016, slow), amp = lerp(26, 70, slow);
+    const x0 = 120, x1 = 960, y0 = 1260;
+    ctx.save();
+    ctx.globalAlpha *= easeOut(ek);
+    ctx.strokeStyle = C.teal; ctx.lineWidth = 7; ctx.lineJoin = "round";
+    ctx.shadowColor = C.teal; ctx.shadowBlur = 18;
+    ctx.beginPath();
+    const end = lerp(x0, x1, easeOut(ek));
+    for (let x = x0; x <= end; x += 4) {
+      const y = y0 + amp * Math.sin((x - t * 260) * freq) * Math.sin(Math.PI * (x - x0) / (x1 - x0));
+      x === x0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    ctx.restore();
+    const awake = 1 - slow;
+    text("जागते हुए: तेज़ लहरें", W / 2, 1400, { size: 46, weight: 500, family: "Mukta", color: C.dim, alpha: easeOut(ek) * awake });
+    text("गहरी नींद: धीमी, बड़ी लहरें", W / 2, 1400, { size: 46, weight: 700, family: "Mukta", color: C.teal, alpha: slow });
+  }
+  ctx.restore();
+}
+
+// S3 9.8–15.8: the brain washes itself (glymphatic system)
+const TOX = (() => { const r = rng(42); const out = []; while (out.length < 34) { const x = (r() - 0.5) * 460, y = (r() - 0.5) * 330 - 10; if ((x / 240) ** 2 + (y / 175) ** 2 < 1) out.push({ x, y, r: 9 + r() * 9, j: r() * 6.28 }); } return out; })();
+function s3(t) {
+  const a = win(t, 9.6, 15.8);
+  if (a <= 0) return;
+  ctx.save(); ctx.globalAlpha = a;
+  // badge
+  const bk = backOut(prog(t, 9.9, 10.4));
+  ctx.save(); ctx.translate(W / 2, 360); ctx.scale(bk, bk);
+  ctx.fillStyle = C.teal; ctx.beginPath(); ctx.arc(0, 0, 50, 0, 6.283); ctx.fill();
+  text("1", 0, 4, { size: 64, color: C.bg0 });
+  ctx.restore();
+  riseText(t, 10.1, "दिमाग़ की धुलाई", W / 2, 490, { size: 104, color: C.teal, glow: 20 });
+  const cx = W / 2, cy = 900, s = 1.05;
+  brain(cx, cy, s, 1);
+  // wave front sweeps left → right
+  const front = lerp(-260, W + 300, easeInOut(prog(t, 11.4, 14.0)));
+  // toxins: jitter until the wave reaches them, then get carried off and fade
+  for (const d of TOX) {
+    const px = cx + d.x * s, py = cy + d.y * s;
+    const hit = front > px - 40;
+    let dx = 0, al = 1;
+    if (hit) {
+      const tc = lerp(11.4, 14.0, inverseEase((px - 40 + 260) / (W + 560)));
+      const k = clamp((t - tc) / 1.1);
+      dx = easeInOut(k) * 520; al = 1 - k;
+    }
+    if (al <= 0) continue;
+    const jx = Math.sin(t * 3 + d.j) * 4, jy = Math.cos(t * 2.6 + d.j) * 4;
+    ctx.globalAlpha = a * al;
+    ctx.fillStyle = C.pink; ctx.shadowColor = C.pink; ctx.shadowBlur = 14;
+    ctx.beginPath(); ctx.arc(px + jx + dx, py + jy - dx * 0.15, d.r, 0, 6.283); ctx.fill();
+  }
+  ctx.shadowBlur = 0; ctx.globalAlpha = a;
+  // fluid band clipped to the brain area
+  if (front > -260 && front < W + 300) {
+    ctx.save();
+    ctx.beginPath(); ctx.ellipse(cx, cy + 20, 330, 300, 0, 0, 6.283); ctx.clip();
+    const g = ctx.createLinearGradient(front - 360, 0, front + 30, 0);
+    g.addColorStop(0, "rgba(92,225,208,0)");
+    g.addColorStop(0.8, "rgba(92,225,208,0.45)");
+    g.addColorStop(1, "rgba(92,225,208,0.75)");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.moveTo(front - 360, cy - 330);
+    for (let y = cy - 330; y <= cy + 330; y += 10) ctx.lineTo(front + 22 * Math.sin(y * 0.03 + t * 8), y);
+    ctx.lineTo(front - 360, cy + 330);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+  const lk = prog(t, 11.0, 11.5);
+  text("● दिन भर जमा हुआ कचरा", W / 2, 1290, { size: 50, weight: 700, family: "Mukta", color: C.pink, alpha: easeOut(lk) });
+  riseText(t, 13.2, "नींद में बहकर बाहर निकल जाता है", W / 2, 1380, { size: 52, weight: 700, family: "Mukta", color: C.ink });
+  ctx.restore();
+}
+function inverseEase(y) { y = clamp(y); let lo = 0, hi = 1; for (let i = 0; i < 24; i++) { const m = (lo + hi) / 2; easeInOut(m) < y ? lo = m : hi = m; } return lo; }
+
+// S4 15.8–21.6: memories get saved
+const NODES = [[540, 760], [360, 690], [720, 690], [250, 880], [470, 930], [640, 900], [830, 870], [360, 1080], [600, 1100], [780, 1060]];
+const EDGES = [[0, 1], [0, 2], [1, 3], [1, 4], [0, 4], [2, 5], [2, 6], [4, 5], [5, 6], [3, 7], [4, 7], [4, 8], [5, 8], [6, 9], [8, 9]];
+function s4(t) {
+  const a = win(t, 15.6, 21.6);
+  if (a <= 0) return;
+  ctx.save(); ctx.globalAlpha = a;
+  const bk = backOut(prog(t, 15.9, 16.4));
+  ctx.save(); ctx.translate(W / 2, 360); ctx.scale(bk, bk);
+  ctx.fillStyle = C.moon; ctx.beginPath(); ctx.arc(0, 0, 50, 0, 6.283); ctx.fill();
+  text("2", 0, 4, { size: 64, color: C.bg0 });
+  ctx.restore();
+  riseText(t, 16.1, "यादें पक्की होती हैं", W / 2, 490, { size: 100, color: C.moon, glow: 20 });
+  EDGES.forEach(([i, j], n) => {
+    const k = easeOut(prog(t, 16.9 + n * 0.17, 17.4 + n * 0.17));
+    if (k <= 0) return;
+    const [x0, y0] = NODES[i], [x1, y1] = NODES[j];
+    ctx.strokeStyle = "rgba(255,214,107,0.55)"; ctx.lineWidth = 6; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(lerp(x0, x1, k), lerp(y0, y1, k)); ctx.stroke();
+    if (k >= 1) { // signal pulse along the link
+      const p = ((t * 0.7 + n * 0.37) % 1);
+      ctx.fillStyle = "#fff"; ctx.shadowColor = C.moon; ctx.shadowBlur = 16;
+      ctx.beginPath(); ctx.arc(lerp(x0, x1, p), lerp(y0, y1, p), 7, 0, 6.283); ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+  });
+  NODES.forEach(([x, y], n) => {
+    const k = backOut(prog(t, 16.5 + n * 0.09, 16.9 + n * 0.09));
+    if (k <= 0) return;
+    const pulse = 1 + 0.12 * Math.sin(t * 4 + n);
+    ctx.fillStyle = C.moon; ctx.shadowColor = C.moon; ctx.shadowBlur = 28;
+    ctx.beginPath(); ctx.arc(x, y, 24 * k * pulse, 0, 6.283); ctx.fill();
+    ctx.shadowBlur = 0;
+  });
+  riseText(t, 18.6, "आज जो सीखा, जो देखा —", W / 2, 1290, { size: 52, weight: 700, family: "Mukta" });
+  riseText(t, 19.1, "वो दिमाग़ में सेव होता है", W / 2, 1375, { size: 60, weight: 700, family: "Mukta", color: C.moon });
+  ctx.restore();
+}
+
+// S5 21.6–26.6: what lack of sleep does
+function s5(t) {
+  const a = win(t, 21.4, 26.6);
+  if (a <= 0) return;
+  ctx.save(); ctx.globalAlpha = a;
+  riseText(t, 21.7, "और कम नींद?", W / 2, 400, { size: 100, color: C.pink, glow: 18 });
+  // card 1
+  const c1 = easeOut(prog(t, 22.3, 22.8));
+  ctx.save(); ctx.globalAlpha *= c1; ctx.translate(0, (1 - c1) * 40);
+  ctx.fillStyle = "rgba(255,143,171,0.12)"; ctx.strokeStyle = "rgba(255,143,171,0.5)"; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.roundRect(110, 560, 860, 360, 44); ctx.fill(); ctx.stroke();
+  text("24 घंटे जागना", W / 2, 650, { size: 84 });
+  text("≈", W / 2, 745, { size: 70, color: C.pink });
+  text("शराब के नशे जैसी हालत", W / 2, 840, { size: 66, color: C.pink });
+  ctx.restore();
+  // bar: reaction getting worse
+  const bk = easeInOut(prog(t, 23.2, 24.4));
+  ctx.save(); ctx.globalAlpha *= easeOut(prog(t, 23.0, 23.3));
+  text("सोचने-समझने की ताक़त", 150, 1000, { size: 42, weight: 500, family: "Mukta", color: C.dim, align: "left" });
+  ctx.fillStyle = "rgba(255,255,255,0.1)"; ctx.beginPath(); ctx.roundRect(150, 1040, 780, 34, 17); ctx.fill();
+  ctx.fillStyle = mix("#5ce1d0", "#ff8fab", bk);
+  ctx.beginPath(); ctx.roundRect(150, 1040, 780 * lerp(1, 0.38, bk), 34, 17); ctx.fill();
+  ctx.restore();
+  // bullets
+  riseText(t, 24.6, "✕ ध्यान भटकता है", 150, 1180, { size: 56, weight: 700, family: "Mukta", align: "left" });
+  riseText(t, 25.1, "✕ बीमारियों से लड़ने की ताक़त घटती है", 150, 1270, { size: 50, weight: 700, family: "Mukta", align: "left", maxW: 820 });
+  ctx.restore();
+}
+
+// S6 26.6–31: call to action — 7–9 hours
+function s6(t) {
+  const a = win(t, 26.4, 31.5);
+  if (a <= 0) return;
+  ctx.save(); ctx.globalAlpha = a;
+  riseText(t, 26.7, "तो हर रात सोइए", W / 2, 400, { size: 84, weight: 600 });
+  const cx = W / 2, cy = 830, R = 250;
+  const rk = easeInOut(prog(t, 27.0, 28.4));
+  ctx.lineCap = "round";
+  ctx.strokeStyle = "rgba(255,255,255,0.1)"; ctx.lineWidth = 34;
+  ctx.beginPath(); ctx.arc(cx, cy, R, 0, 6.283); ctx.stroke();
+  // 8 of 24 hours ≈ one third, closing the loop with the opening hook
+  ctx.strokeStyle = C.moon; ctx.shadowColor = C.moon; ctx.shadowBlur = 30;
+  ctx.beginPath(); ctx.arc(cx, cy, R, -Math.PI / 2, -Math.PI / 2 + 6.283 * (8 / 24) * rk); ctx.stroke();
+  ctx.shadowBlur = 0;
+  const nk = backOut(prog(t, 27.6, 28.2));
+  ctx.save(); ctx.translate(cx, cy - 10); ctx.scale(nk, nk);
+  text("7–9", 0, -20, { size: 170, color: C.moon, alpha: clamp(nk) });
+  text("घंटे", 0, 100, { size: 72, alpha: clamp(nk) });
+  ctx.restore();
+  riseText(t, 28.6, "आज रात फ़ोन जल्दी रख दीजिए", W / 2, 1210, { size: 58, weight: 700, family: "Mukta" });
+  riseText(t, 29.1, "शुभ रात्रि", W / 2, 1320, { size: 90, color: C.moon, glow: 24 });
+  moon(W / 2, lerp(1720, 1560, easeOut(prog(t, 28.8, 30))), 70, easeOut(prog(t, 28.8, 29.6)));
+  ctx.restore();
+}
+
+function render(t) {
+  ctx.save();
+  ctx.clearRect(0, 0, W, H);
+  background(t);
+  chrome(t);
+  s1(t); s2(t); s3(t); s4(t); s5(t); s6(t);
+  // final fade to black
+  const out = prog(t, 30.3, 31);
+  if (out > 0) { ctx.fillStyle = `rgba(7,11,31,${easeInOut(out)})`; ctx.fillRect(0, 0, W, H); }
+  ctx.restore();
+}
+
+window.DURATION = DURATION; window.FPS = FPS; window.render = render;
+window.ready = (async () => {
+  const fams = ['800 40px "Baloo 2"', '600 40px "Baloo 2"', '500 40px "Mukta"', '700 40px "Mukta"'];
+  await Promise.all(fams.flatMap(f => [document.fonts.load(f, "अआ"), document.fonts.load(f, "Aa1")]));
+  render(0);
+  return true;
+})();
+
+// live preview when opened in a browser (not during capture)
+if (!new URLSearchParams(location.search).has("capture")) {
+  window.ready.then(() => { const t0 = performance.now(); (function loop() { render(((performance.now() - t0) / 1000) % DURATION); requestAnimationFrame(loop); })(); });
+}
+</script>
+</body>
+</html>
